@@ -20,10 +20,13 @@ Command line based calculation of XAS/RIXS spectra via Quanty and Crispy.
     The Quanty executable must be accessible.
 
 2. Download Crispy
+
     2.1. Download from source
+
         To do
 
     2.2. Download from PIP
+    
         To do
 
 ## To do
