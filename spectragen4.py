@@ -1,6 +1,32 @@
 #! /usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Package for spectrum generation via crispy 0.7.3 and Quanty.
+r"""Package for spectrum generation via crispy 0.7.4 and Quanty.
+
+Usage
+
+1) Download the latest version (right now, this is 0.7.4 - 2024-05-27) from GitHub
+https://github.com/mretegan/crispy, unzip it.
+
+2) Download Quanty for Windows https://www.quanty.org/index.html
+
+3) Import this file in your python script
+
+>>> import sys
+>>> sys.path.append(r'<path-to-spectragen>\spectragen4')
+>>> import spectragen4 as sg4
+
+4) set quanty and crispy filepaths
+
+>>> sg4.settings.QUANTY_FILEPATH = r'C:\Users\galdin_c\github\quanty\quanty_win\QuantyWin64.exe'
+>>> sg4.settings.CRISPY_FILEPATH = r'C:\Users\galdin_c\github\crispy-0.7.4'
+
+5) if you want to use it with brixs, set USE_BRIXS to True
+
+>>> sg4.settings.USE_BRIXS = True
+
+6) basic calculation
+
+
 
 TO DO:
 ( ) Check if broaden works with non-monotonic data.
@@ -327,7 +353,8 @@ class Calculation():
         xLorentzian (number, tuple, or list, optional):
             * For 'XAS', it is the spectral broadening for the first and second
                 half of the spectrum. default depends on the element, oxidation
-                state, etc.
+                state, etc. WARNING: as for now, the second number in the xLorentzian
+                applies to both edges.
             * For 'XES' and 'XPS', not sure. Need to check!
             * For 'RIXS', n.a.
         yLorentzian (tuple or list, optional):
@@ -1444,7 +1471,7 @@ def quanty(filepath):
         raise ValueError(f'Error while loading file: {filepath}. \n {error}')
     return output
 
-def load1(filepath, USE_BRIXS=False):
+def load1(filepath):
     """Load spectrum.
 
     Args:
@@ -1470,12 +1497,12 @@ def load1(filepath, USE_BRIXS=False):
             data[:, i+1] = ys[:, i]
 
     # return
-    if USE_BRIXS:
+    if settings.USE_BRIXS:
         if data.shape[1] > 2:
-            ss = settings._br.Spectra(n=data.shape[1]-1)
-            for i in range(len(ss)+1):
+            ss = settings._br.Spectra()
+            for i in range(data.shape[1]):
                 if i!=0:
-                    ss[i-1] = settings._br.Spectrum(x=data[:, 0], y=data[:, i])
+                    ss.append(settings._br.Spectrum(x=data[:, 0], y=data[:, i]))
             return ss
         else:
             return settings._br.Spectrum(x=data[:, 0], y=data[:, 1])
@@ -1484,7 +1511,7 @@ def load1(filepath, USE_BRIXS=False):
     
 def load_spectrum(*args):
     if len(args) == 1:
-        return load1(args[0], USE_BRIXS=settings.USE_BRIXS)
+        return load1(args[0])
     else:
         if settings.USE_BRIXS:
             ss = settings._br.Spectra()
@@ -1499,7 +1526,7 @@ def load_spectrum(*args):
         else:
             final = []
             for filepath in args:
-                final.append(load1(filepath, USE_BRIXS=settings.USE_BRIXS))
+                final.append(load1(filepath))
             return final
 
 
