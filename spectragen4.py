@@ -26,6 +26,34 @@ https://github.com/mretegan/crispy, unzip it.
 
 6) basic calculation
 
+TO DO
+
+
+
+
+
+7) Notes
+
+For a octahedral environment, note that the crystal field coordinate system is
+such that the planar ligands point to the x and y coordinates and the apical 
+ligands are laid along the z axis. Therefore, one can set k1, eps11, and eps12
+such as the example below:
+
+Top view (lab coordinates)
+                       .
+                     .   .
+LH y (010)         .       .
+    |            .           .
+────O────────  .   octahedron  . ────> x (100)
+ LV z (001       .           .
+                   .       .
+                     .   .
+                       .
+
+octahedron z: points out of the screen
+lab z: points out of the screen
+
+
 
 
 TO DO:
@@ -175,8 +203,9 @@ is_mac     = system == 'darwin'
 
 # %% support classes ===========================================================
 class _hamiltonianState(MutableMapping):
-    def __init__(self, initial):
+    def __init__(self, initial, parent):
         self.store = dict(initial)
+        self.parent = parent
 
         # change from int to bool
         for name in self.store:
@@ -198,11 +227,54 @@ class _hamiltonianState(MutableMapping):
     def __setitem__(self, name, value):
         if name not in self:
             raise ValueError(f'New terms cannot be created.\nInvalid term: {name}\nValid terms are: {list(self.keys())}')
-        if value:
+        assert isinstance(value, bool), f'hamiltonianState[{name}] must be a bool (True or False), not type: {type(value)}'
+
+        if self.store[name] == False and value == True:  # from False to True
+            
+            # check if LMCT and MLCT are True at the same time
+            if name == '3d-Ligands Hybridization (LMCT)':
+                if self.store['3d-Ligands Hybridization (MLCT)']:
+                    raise ValueError('Ligands Hybridization LMCT and MLCT cannot be both True.\nIf you want to set LMCT to True, you have to set MLCT to False first')
+            elif name == '3d-Ligands Hybridization (MLCT)':
+                if self.store['3d-Ligands Hybridization (LMCT)']:
+                    raise ValueError('Ligands Hybridization MLCT and LMCT cannot be both True.\nIf you want to set MLCT to True, you have to set LMCT to False first')
+            
+            # set value
             self.store[name] = True
-        else:
+
+            # Determine the maximum number of allowed configurations.
+            if name == '3d-Ligands Hybridization (LMCT)':
+                if 'd' in self.parent.q.block:
+                    self.parent.q.nConfigurationsMax = 10 - self.parent.nElectrons + 1
+                elif 'f' in self.parent.q.block:
+                    self.parent.q.nConfigurationsMax = 14 - self.parent.nElectrons + 1
+                self.parent.q.nConfigurations = 2
+                print(f'LMCT changed from False to True: nConfigurationsMax changed from 1 to {self.parent.nConfigurationsMax}')
+                print(f'LMCT changed from False to True: nConfigurations changed from 1 to 2')
+            elif name == '3d-Ligands Hybridization (MLCT)':
+                self.parent.q.nConfigurationsMax = self.parent.nElectrons + 1
+                self.parent.q.nConfigurations = 2
+                print(f'MLCT changed from False to True: nConfigurationsMax changed from 1 to {self.parent.nConfigurationsMax}')
+                print(f'MLCT changed from False to True: nConfigurations changed from 1 to 2')
+
+        elif self.store[name] == True and value == False:  # from True to False
+            # set value
             self.store[name] = False
-        self.check_hybridization()
+            
+            # Determine the maximum number of allowed configurations.
+            if name == '3d-Ligands Hybridization (LMCT)':
+                print(f'LMCT changed from True to False: nConfigurationsMax changed from {self.parent.nConfigurationsMax} to 1')
+                print(f'LMCT changed from True to False: nConfigurations changed from {self.parent.nConfigurations} to 1')
+                self.parent.q.nConfigurationsMax = 1
+                self.parent.q.nConfigurations    = 1
+            elif name == '3d-Ligands Hybridization (MLCT)':
+                self.parent.q.nConfigurationsMax = 1
+                self.parent.q.nConfigurations    = 1
+                print(f'MLCT changed from True to False: nConfigurationsMax changed from {self.parent.nConfigurationsMax} to 1')
+                print(f'MLCT changed from True to False: nConfigurations changed from {self.parent.nConfigurations} to 1')
+        else:
+            pass
+
 
     def __delitem__(self, key):
         raise AttributeError('Items cannot be deleted')
@@ -213,19 +285,19 @@ class _hamiltonianState(MutableMapping):
     def __len__(self):
         return len({name:self.store[name] for name in self.store if self.store[name] is not None})
 
-    def check_hybridization(self):
-        lmct = False
-        mlct = False
-        for item in self.store:
-            if item.endswith('(LMCT)'):
-                lmct = self.store[item]
-            elif item.endswith('(MLCT)'):
-                mlct = self.store[item]
-        if lmct and mlct:
-            for item in self.store:
-                if item.endswith('(LMCT)') or item.endswith('(MLCT)'):
-                    self.store[item] = False
-            raise ValueError('Ligands Hybridization LMCT and MLCT cannot be both True.\nSwitching both to False.')
+    # def check_hybridization(self):
+    #     lmct = False
+    #     mlct = False
+    #     for item in self.store:
+    #         if item.endswith('(LMCT)'):
+    #             lmct = self.store[item]
+    #         elif item.endswith('(MLCT)'):
+    #             mlct = self.store[item]
+    #     if lmct and mlct:
+    #         for item in self.store:
+    #             if item.endswith('(LMCT)') or item.endswith('(MLCT)'):
+    #                 self.store[item] = False
+    #         raise ValueError('Ligands Hybridization LMCT and MLCT cannot be both True.\nSwitching both to False.')
 
     def export(self):
         temp = {}
@@ -323,9 +395,6 @@ class Calculation():
             Default is None.
         nPsisAuto (int, optional): If 1, a suitable value will be picked for 
             nPsis. Default is 1.
-        nConfigurations (int, optional): number of configurations. If None,
-            a suitable value will be calculated. default is None.
-            APPARENTLY THIS IS ALWAYS 1.
 
         filepath_lua (str or pathlib.Path, optional): filepath to save .lua file. 
             If extension .lua is not present, extension .lua is added.
@@ -428,7 +497,19 @@ class Calculation():
             be chosen. default is None.
 
     Attributes:
-        All initial args are also attributes.
+        All initial args are also attributes, plus we have extra attrs to be 
+        edited after creating a Calculation object:
+
+        nConfigurations (int, optional): number of configurations. If None,
+            a suitable value will be calculated. default is None. If LMCT or
+            MLCT are False in hamiltonianState, then the nConfigurations is 
+            always 1 (there is only one final configuration). If LMCT or MLCT 
+            are True, then there could be multiple final states where the ligand
+            lends the Metal a electron (or more) and vice-versa. The maximum number
+            of final states depends on how many holes the Metal or the ligand has.
+            To check the maximum number of final states allowed, check q.nConfigurationsMax
+        nConfigurationsMax (int, read only): Maximum number of final configuration allowed.
+            See q.nConfigurations.
         hamiltonianState (dict, optional): a dictionary that turns on or off the
             different contributions to the hamiltonian. default is such that
             'Atomic', 'Crystal Field', and 'Magnetic Field' terms will be True.
@@ -441,6 +522,12 @@ class Calculation():
         run(): Create quanty calculation.
 
         load_spectrum(): Load calculated spectrum from file.
+
+            if Linear Dichroism XAS, load [spectrum for eps11 (v), spectrum for eps12 (h), subtracted spectrum (v-h)]
+            if Circular Dichroism XAS, load [spectrum for left (l), spectrum for right (r), subtracted spectrum (l-r)]
+            if Isotropic XAS, load isotropic spectrum
+            ...
+
 
         get_parameters(): Returns a dictionary with all calculation parameters.
         save_parameters(): Save calculation parameters to a file.
@@ -455,7 +542,7 @@ class Calculation():
                          toCalculate     = 'Isotropic',
                          nPsis           = None,
                          nPsisAuto       = 1,
-                         nConfigurations = 1,
+                        #  nConfigurations = 1,
                          filepath_lua    = None,
                          filepath_spec   = None,
                          filepath_par    = None,
@@ -485,17 +572,17 @@ class Calculation():
         self.denseBorder = '2000'
 
         # primary attributes
-        self._set_primary_attributes(element, charge, symmetry, experiment, edge)
+        self._set_primary_attributes(element, charge, symmetry, experiment, edge)  # sets up self.q
 
-        # # hamiltonian
-        self.hamiltonianState = _hamiltonianState(self.q.hamiltonianState)
+        # hamiltonian
+        self.hamiltonianState = _hamiltonianState(self.q.hamiltonianState, parent=self)
         self.hamiltonianData  = _hamiltonianData(self.q.hamiltonianData)
 
         # calculation attributes
         self.toCalculate     = toCalculate
         self.nPsis           = nPsis
         self.nPsisAuto       = nPsisAuto
-        self.nConfigurations = nConfigurations  # this is always 1 in Crispy.
+        self.nConfigurations = 1  # this is always 1 in Crispy if LMCT or MLCT is False
         self.filepath_lua    = filepath_lua
         self.filepath_spec   = filepath_spec
         self.filepath_par    = filepath_par
@@ -615,6 +702,18 @@ class Calculation():
     @edge.deleter
     def edge(self):
         raise AttributeError('Cannot delete object.')
+    
+    @property
+    def nElectrons(self):
+        return self.q.nElectrons
+    @nElectrons.setter
+    def nElectrons(self, value):
+        raise AttributeError('nElectrons is defined with primary attributes (element, charge, symmetry, experiment, edge) and cannot be changed.\nPlease, start a new Calculation() object')
+    @nElectrons.deleter
+    def nElectrons(self):
+        raise AttributeError('Cannot delete object.')
+    
+
 
     # %% calculation attributes
     @property
@@ -681,19 +780,31 @@ class Calculation():
         raise AttributeError('Cannot delete object.')
 
     @property
+    def nConfigurationsMax(self):
+        return self.q.nConfigurationsMax
+    @nConfigurationsMax.setter
+    def nConfigurationsMax(self, value):
+        raise AttributeError('Cannot manually edit nConfigurationsMax object.')
+    @nConfigurationsMax.deleter
+    def nConfigurationsMax(self):
+        raise AttributeError('Cannot delete object.')
+
+    @property
     def nConfigurations(self):
         return self.q.nConfigurations
     @nConfigurations.setter
     def nConfigurations(self, value):
-        if value is None:
-            value = self.q.nConfigurationsMax
-        else:
-            assert value <= self.q.nConfigurationsMax, f'The maximum number of configurations is {self.q.nConfigurationsMax}.'
-
+        assert value <= self.nConfigurationsMax, f'The maximum number of configurations is {self.nConfigurationsMax}'
+        assert value >= 1, f'The minimum number of configurations is 1'
+        assert isinstance(value, int), f'nConfigurations must be a int, not type: {type(value)}'
         self.q.nConfigurations = value
     @nConfigurations.deleter
     def nConfigurations(self):
         raise AttributeError('Cannot delete object.')
+    
+    
+
+
 
     @property
     def filepath_lua(self):
@@ -1116,6 +1227,7 @@ class Calculation():
                     "    Gh.Shift(Eedge1-DeltaE)\n" + \
                     "    SaveSpectrum(Gv, 'v')"
             replace(filepath_lua, pattern, subst)
+
         
         # LMCT fix
         if "3d-Ligands Hybridization (MLCT)" in self.hamiltonianState:
@@ -1195,11 +1307,13 @@ class Calculation():
                 s.symmetry   = self.symmetry
                 s.experiment = self.experiment
                 s.edge       = self.edge
+                s.nElectrons = self.nElectrons
 
-                s.toCalculate     = self.toCalculate
-                s.nPsis           = self.nPsis
-                s.nPsisAuto       = self.nPsisAuto
-                s.nConfigurations = self.nConfigurations
+                s.toCalculate        = self.toCalculate
+                s.nPsis              = self.nPsis
+                s.nPsisAuto          = self.nPsisAuto
+                s.nConfigurations    = self.nConfigurations
+                s.nConfigurationsMax = self.nConfigurationsMax
                 
                 s.hamiltonianData  = self.hamiltonianData
                 s.hamiltonianState = self.hamiltonianState
@@ -1234,11 +1348,13 @@ class Calculation():
         ss.symmetry   = self.symmetry
         ss.experiment = self.experiment
         ss.edge       = self.edge
+        ss.nElectrons = self.nElectrons
 
-        ss.toCalculate     = self.toCalculate
-        ss.nPsis           = self.nPsis
-        ss.nPsisAuto       = self.nPsisAuto
-        ss.nConfigurations = self.nConfigurations
+        ss.toCalculate        = self.toCalculate
+        ss.nPsis              = self.nPsis
+        ss.nPsisAuto          = self.nPsisAuto
+        ss.nConfigurations    = self.nConfigurations
+        ss.nConfigurationsMax = self.nConfigurationsMax
 
         ss.hamiltonianData  = self.hamiltonianData
         ss.hamiltonianState = self.hamiltonianState
@@ -1270,6 +1386,12 @@ class Calculation():
             filepath = filepath.parent / str(filepath.name).replace('.spec', '_iso.spec')
             data = load_spectrum(filepath)
         elif self.toCalculate == 'Circular Dichroism':
+            # filepath = filepath.parent / str(filepath.name).replace('.spec', '_r.spec')  
+            # data = load_spectrum(filepath)
+            # if settings.USE_BRIXS:
+            #     data[0].pol = 'left'
+            #     data[1].pol = 'right'
+            #     data[2].pol = 'cd'
             filepaths = [filepath.parent / str(filepath.name).replace('.spec', '_l.spec'), 
                          filepath.parent / str(filepath.name).replace('.spec', '_r.spec'), 
                          filepath.parent / str(filepath.name).replace('.spec', '_cd.spec') 
@@ -1280,6 +1402,8 @@ class Calculation():
                 data[1].pol = 'right'
                 data[2].pol = 'cd'
         elif self.experiment == 'XAS' and self.toCalculate == 'Linear Dichroism':
+            # filepath = filepath.parent / str(filepath.name).replace('.spec', '_v.spec')
+            # data = load_spectrum(filepath)
             filepaths = [filepath.parent / str(filepath.name).replace('.spec', '_v.spec'),
                          filepath.parent / str(filepath.name).replace('.spec', '_h.spec'),
                          filepath.parent / str(filepath.name).replace('.spec', '_ld.spec')
