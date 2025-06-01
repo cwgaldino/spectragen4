@@ -89,6 +89,21 @@ def _broaden(self, value):
     """
     # xScale = np.abs(self.x.min() - self.x.max()) / self.x.shape[0]
     # fwhm = float(value)/float(xScale)
+    s = self.copy()
+    s.y = broaden(self.x, self.y, value)
+    return s
+
+def _broaden2(self, value):
+    """Apply gaussian broadening to spectrum.
+
+    Args:
+        value (number): fwhm value of the gaussian broadening.
+
+    Returns:
+        None
+    """
+    # xScale = np.abs(self.x.min() - self.x.max()) / self.x.shape[0]
+    # fwhm = float(value)/float(xScale)
     self.y = broaden(self.x, self.y, value)
 
 def broaden(x, y, value):
@@ -113,7 +128,225 @@ def _normalize(vector):
         return vector/np.linalg.norm(vector)
     else:
         return vector
+
+
+# The functions down below are used to print/save the initial wavefunctions 
+# specifically for Cu2+ (d9). It will not work for other ions because the base
+# wavefunctions are just too many due to the ion having more than one electron 
+# hole in the d shell. Although possible, I think it is annoying to write the 
+# base wave functions down in terms of spherical harmonics. Also, I don't see the
+# real benefit of it now. So, as for right now, I am not even thinking 
+# about expanding this to "multi-electronic" ions.
+
+# one thing that one could do easily, would be to expand this code to other d9 
+# ions other than Cu2+. For that one would just have to check the number of electrons
+# or holes in the the d shell before printing/saving the initial wave functions.
+
+# I only tested this code for Oh and D4h geometry, but I fail to see any reason
+# why it wouldn't work for any other geometry.
+
+text_defining_functions_for_print_wavefunction_for_d4h_3d_ions = r"""--------------------------------------------------------------------------------
+-- functions for saving/printing initial wavefunctions (only works for 3d metals in an Oh/D4h env.)
+--------------------------------------------------------------------------------
+-- z2    = Y^0
+-- x2-y2 = 1/sqrt(2) [Y-2 + Y2]
+-- xy    = 1/i*sqrt(2) [Y-2 - Y2]
+-- yz    = i/sqrt(2) [Y-1 + Y1]
+-- xz    = 1/sqrt(2) [Y-1 - Y1]
+
+function replace_char(pos, str, r)
+    return str:sub(1, pos-1) .. r .. str:sub(pos+1)
+end
+
+
+function print_psi(Psis_i, base_psis, base_dets, base_sphe, H_i, filepath, verbose)
+
+    -- wavefunction name and energy
+    for i, psi in ipairs(Psis_i) do
+        number_of_eigenfunctions = i
+    end
     
+    -- initial header
+    text = ''
+    text = text .. '#########################\n'
+    text = text .. '# INITIAL WAVEFUNCTIONS #\n'
+    text = text .. '#########################\n'
+    text = text .. '# Number of wavefunctions: ' .. number_of_eigenfunctions .. '\n'
+    text = text .. '# number Energy wavefunction\n'
+    for i, psi in ipairs(Psis_i) do
+        text = text .. '    ' .. i .. '      <<E' .. i .. '>>  <<psi' .. i .. '>>' .. '\n'
+    end
+    text = text .. '# \n'
+
+    for i, psi in ipairs(Psis_i) do
+        -- calculate energy
+        if H_i ~= nil then
+            _E = Complex.Re(psi * H_i * psi) -- Taking the real part only because sometimes the precision error creates a small im component
+        else
+            _E =  0
+        end
+
+        -- wavefunction name and energy
+        text = text .. '###################\n'
+        text = text .. '# WAVEFUNCTION: ' .. i ..' # \n'
+        text = text .. '###################\n'
+        text = text .. '# E' .. i .. ' = ' .. _E.. '\n'
+        -- text = text .. '# \n'
+
+        -- M holes
+        text = text .. '# =============== M holes ===============\n'
+        if H_3d_ligands_hybridization_lmct == 1 then
+            text = text .. '# 2p       3d         L     Y_2^ml(ms) factor\n'
+        else
+            text = text .. '# 2p       3d    Y_2^ml(ms) factor\n'
+        end
+        for j = 1, 10, 1 do
+            factor = psi*base_psis[j]
+            if math.abs(Complex.Im(factor)) > epsilon then
+                _factor = '(' .. Complex.Re(factor) .. ', ' .. Complex.Im(factor) .. '*I)'
+                text = text .. base_dets[j]  .. '  ' .. base_sphe[j] .. '    ' .. _factor .. '\n'
+            else
+                text = text .. base_dets[j]  .. '  ' .. base_sphe[j] .. '    ' .. Complex.Re(factor) .. '\n'
+            end
+        end
+
+        -- find wavefunction with highest factor
+        -- highest = psi*base_psis[1]
+        factor = psi*base_psis[1]
+        highest = Complex.Re(factor)^2 + Complex.Im(factor)^2
+        for j = 2, 10, 1 do
+            _factor = psi*base_psis[j]
+            _temp = Complex.Re(_factor)^2 + Complex.Im(_factor)^2
+            if _temp > highest then
+                highest = _temp
+            end
+        end
+
+        -- find all wavefunctions where contribution is larger than 10% of highest contribution
+        _final = 'psi' .. i .. ' = '
+        for j = 1, 10, 1 do 
+            _factor = psi*base_psis[j]
+            _temp = Complex.Re(_factor)^2 + Complex.Im(_factor)^2
+            if math.abs(_temp) > math.abs(highest)*0.1 then
+                factor = psi*base_psis[j]
+                if math.abs(Complex.Im(_factor)) > epsilon then
+                    _factor = '(' .. tonumber(string.format("%.3f", math.abs(Complex.Re(factor)))) .. ', ' .. tonumber(string.format("%.3f", math.abs(Complex.Im(factor))))  .. '*I)'
+                    _final = _final .. ' + ' .. _factor .. '*' .. base_sphe[j]
+                else
+                    _factor = tonumber(string.format("%.3f", math.abs(Complex.Re(factor))))
+                    if Complex.Re(factor) < 0 then
+                        _final = _final .. ' - ' .. _factor .. '*' .. base_sphe[j]
+                    else
+                        _final = _final .. ' + ' .. _factor .. '*' .. base_sphe[j]
+                    end
+                end
+
+            end
+        end
+        -- _final = string.sub(_final, 1, -3)
+
+        -- print final psi_i
+        text = text .. '# \n'
+        text = text .. '# Estimated wavefunction in terms of spherical harmonics:\n'
+        text = text .. _final .. '\n'
+        text = text .. '# \n'
+
+        -- L holes
+        if H_3d_ligands_hybridization_lmct == 1 or H_3d_ligands_hybridization_mlct == 1 then
+            text = text .. '# =============== L holes ===============\n'
+            text = text .. '# 2p       3d         L    factor\n'
+            for j = 11, 20, 1 do
+                factor = psi*base_psis[j]
+                if math.abs(Complex.Im(factor)) > epsilon then
+                    _factor = '(' .. Complex.Re(factor) .. ', ' .. Complex.Im(factor) .. '*I)'
+                    text = text .. base_dets[j]  .. '  ' .. _factor .. '\n'
+                else
+                    text = text .. base_dets[j]  .. '  '  .. Complex.Re(factor) .. '\n'
+                end
+                -- text = text .. base_dets[j] .. ' ' .. psi*base_psis[j] .. '\n'
+            end
+        end
+
+        -- end of wavefunction table
+        text = text .. '# \n'
+
+        -- update header
+        text = string.gsub(text, '<<psi' .. i .. '>>', _final)
+        text = string.gsub(text, '<<E' .. i .. '>>', _E)
+
+    end
+
+    if verbose == 1 then
+        print(text)
+    end
+
+    if filepath ~= nil then
+        file = io.open(filepath, "w")
+        file:write(text)
+        file:close()
+    end
+end
+"""
+
+text_defining_base_for_printing_wavefunction_for_d4h_3d_ions = r"""-- base wavefunctions for printing/saving initial wavefunctions (only works for 3d metals in an Oh/D4h env.)
+--------------------------------------------------------------------------------
+-- z2    = Y^0
+-- x2-y2 = 1/sqrt(2) [Y-2 + Y2]
+-- xy    = 1/i*sqrt(2) [Y-2 - Y2]
+-- yz    = i/sqrt(2) [Y-1 + Y1]
+-- xz    = 1/sqrt(2) [Y-1 - Y1]
+
+base_psis = {}
+base_dets = {}
+base_sphe = {'Y^-2(-)', 'Y^-2(+)', 'Y^-1(-)', 'Y^-1(+)', 'Y^0(-)', 'Y^0(+)', 'Y^1(-)', 'Y^1(+)', 'Y^2(-)', 'Y^2(+)'}
+if H_3d_ligands_hybridization_lmct == 1 or H_3d_ligands_hybridization_mlct == 1 then
+    for i = 1, 20, 1 do
+        _det  = replace_char(6+i, '11111111111111111111111111', '0') 
+        _psi = NewWavefunction(NFermions, NBosons, {{_det, 1}})
+        table.insert(base_psis, _psi)
+
+        _det2 = replace_char(6, _det, '1 ') 
+        if i < 11 then
+            _det2 = replace_char(18, _det2, ' 1') 
+        else
+            _det2 = replace_char(17, _det2, '1 ') 
+        end
+        table.insert(base_dets, _det2)
+    end
+else
+    for i = 1, 10, 1 do
+        _det  = replace_char(6+i, '1111111111111111', '0') 
+        _psi = NewWavefunction(NFermions, NBosons, {{_det, 1}})
+        table.insert(base_psis, _psi)
+
+        _det2 = replace_char(6, _det, '1 ') 
+        table.insert(base_dets, _det2)
+    end
+end
+
+-- z2    = Y^0
+psi_z2_m    = base_psis[5]
+psi_z2_p    = base_psis[6]
+
+-- x2-y2 = 1/sqrt(2) [Y-2 + Y2]
+psi_x2_y2_m = math.sqrt(1/2)*base_psis[1] + math.sqrt(1/2)*base_psis[9]
+psi_x2_y2_p = math.sqrt(1/2)*base_psis[2] + math.sqrt(1/2)*base_psis[10]
+
+-- xy    = 1/i*sqrt(2) [Y-2 - Y2]
+psi_xy_m = (1/I)*math.sqrt(1/2)*base_psis[1] - (1/I)*math.sqrt(1/2)*base_psis[9]
+psi_xy_p = (1/I)*math.sqrt(1/2)*base_psis[2] - (1/I)*math.sqrt(1/2)*base_psis[10]
+
+-- yz    = i/sqrt(2) [Y-1 + Y1]
+psi_yz_m = I*math.sqrt(1/2)*base_psis[3] + I*math.sqrt(1/2)*base_psis[7]
+psi_yz_p = I*math.sqrt(1/2)*base_psis[4] + I*math.sqrt(1/2)*base_psis[8]
+
+-- xz    = 1/sqrt(2) [Y-1 - Y1]
+psi_xz_m = math.sqrt(1/2)*base_psis[3] - math.sqrt(1/2)*base_psis[7]
+psi_xz_p = math.sqrt(1/2)*base_psis[4] - math.sqrt(1/2)*base_psis[8]
+
+"""
+
+
 # %% settings ==================================================================
 class _settings():
 
@@ -185,6 +418,7 @@ class _settings():
             import brixs as _br
             settings._br = _br
             settings._br.Spectrum.broaden = _broaden
+            settings._br.Spectrum.broaden2 = _broaden2
         # save
         self._USE_BRIXS = value
     @USE_BRIXS.deleter
@@ -496,6 +730,22 @@ class Calculation():
             If None, a suitable value depending on the element will
             be chosen. default is None.
 
+        Some extra arguments that for enhanced funcionality (ONLY FOR Cu 2+):
+
+        print_initial_wavefunctions (bool, optional): If True, will print a 
+        comprehensive table with determinants, spherical
+         harmonics, and factors for the initial calculated wavefunctions
+         (eigenvectors of the initial hamiltonian). This is only implemented for 3d metals 
+         and will raise an error otherwise. Default is False.
+        filepath_for_saving_initial_wavefunctions (string, None, or Path, optional): will 
+         save to a file the comprehensive table with determinants, spherical
+         harmonics, and factors for the initial calculated wavefunctions
+         (eigenvectors of the initial hamiltonian). This is only implemented for 3d metals 
+         and will raise an error otherwise. Default is None.
+        filepath_for_saving_all_eigenstates_of_initial_hamiltonian (string, None, or Path, optional):
+        Same as filepath_for_saving_initial_wavefunctions, but will save all 
+        eigenfunctions of the initial hamiltonian.
+
     Attributes:
         All initial args are also attributes, plus we have extra attrs to be 
         edited after creating a Calculation object:
@@ -565,7 +815,7 @@ class Calculation():
                          xNPoints = None,
                          yMin     = None,
                          yMax     = None,
-                         yNPoints = None
+                         yNPoints = None,
                          ):
         # crispy attributes
         self.verbosity   = '0x0000'
@@ -652,7 +902,7 @@ class Calculation():
         # set border (this is set the same as in crispy)
         self.q.denseBorder = self.denseBorder
 
-    # %% primary attributes
+    # % primary attributes
     @property
     def element(self):
         return self.q.element
@@ -715,7 +965,7 @@ class Calculation():
     
 
 
-    # %% calculation attributes
+    # % calculation attributes
     @property
     def toCalculate(self):
         return self.q.spectra.toCalculate[0]
@@ -846,7 +1096,7 @@ class Calculation():
     def filepath_par(self):
         raise AttributeError('Cannot delete object.')
 
-    # %% spectrum attributes
+    # % spectrum attributes
     @property
     def xMin(self):
         return self.q.xMin
@@ -943,7 +1193,7 @@ class Calculation():
     def yNPoints(self):
         raise AttributeError('Cannot delete object.')
 
-    # %% broadening attributes
+    # % broadening attributes
     @property
     def xLorentzian(self):
         return self.q.xLorentzian
@@ -988,7 +1238,7 @@ class Calculation():
     def yLorentzian(self):
         raise AttributeError('Cannot delete object.')
 
-    # %% experiment attributes
+    # % experiment attributes
     @property
     def temperature(self):
         return self.q.temperature
@@ -1024,7 +1274,7 @@ class Calculation():
     def magneticField(self):
         raise AttributeError('Cannot delete object.')
 
-    # %% orientation attributes
+    # % orientation attributes
     @property
     def k1(self):
         return self.q.k1
@@ -1094,7 +1344,7 @@ class Calculation():
     def eps22(self):
         raise AttributeError('Cannot delete object.')
 
-    # %% extra attr
+    # % extra attr
     @property
     def configurations(self):
         return settings.default[self.element]['charges'][self.charge]['symmetries'][self.symmetry]['experiments'][self.experiment]['edges'][self.edge]['configurations']
@@ -1114,8 +1364,9 @@ class Calculation():
     @resonance.deleter
     def resonance(self):
         raise AttributeError('Cannot delete object.')
+    
 
-    # %% support
+    # % support
     def _update_magnetic_field_hamiltonian_data(self):
         value = self.magneticField
         k1    = np.array(self.k1)
@@ -1141,9 +1392,33 @@ class Calculation():
         """For RIXS, calculate incident energies"""
         return np.linspace(self.xMin, self.xMax, self.xNPoints)
     
-    # %% Core methods
-    def save_input(self):
-        """Create and save Quanty input file (.lua).
+    # % Core methods
+    def save_input(self, print_initial_wavefunctions=False, 
+                   filepath_for_saving_initial_wavefunctions=None,
+                   filepath_for_saving_all_eigenstates_of_initial_hamiltonian=None):
+        """Create and save a Quanty input file (.lua).
+
+        Example:
+            q = sg4.Calculation(element='Cu', charge='2+', symmetry='D4h', experiment='RIXS', edge='L2,3-M4,5 (2p3d)')
+            q.filepath_lua = 'Document/test_filepath'
+            q.save_input()
+
+        Args:
+            print_initial_wavefunctions (bool, optional): If True, the initial 
+                wavefunction will be printed. Default is False. AS FOR RIGHT NOW,
+                THIS ONLY WORKS FOR Cu2+. 
+            filepath_for_saving_initial_wavefunctions (None, str, or path, optional): 
+                If str or Path, a file will be saved with the initial wavefunction.
+                Default is None. AS FOR RIGHT NOW, THIS ONLY WORKS FOR Cu2+. 
+            filepath_for_saving_all_eigenstates_of_initial_hamiltonian (None, str, or path, optional): 
+                If str or Path, a file will be saved with the eigenstate of the initial hamiltonian.
+                Default is None. AS FOR RIGHT NOW, THIS ONLY WORKS FOR Cu2+. 
+
+        Warning:
+            print_initial_wavefunctions, filepath_for_saving_initial_wavefunctions, and
+            filepath_for_saving_all_eigenstates_of_initial_hamiltonian only works
+            for Cu2+. Implementation for other ions should be easy, but I didn't 
+            get to do it yet.
 
         Returns:
             None
@@ -1288,6 +1563,75 @@ class Calculation():
             subst   = "    for j = 1, 1 do"
             replace(filepath_lua, pattern, subst)
 
+
+        # print initial wavefunctions (ONLY FOR CU2+)
+        if print_initial_wavefunctions or filepath_for_saving_initial_wavefunctions is not None or filepath_for_saving_all_eigenstates_of_initial_hamiltonian is not None:
+            assert self.element == 'Cu' and self.charge == '2+', f'Sorry, as for right now, `priting/saving wavefunctions` is only available for Cu2+'
+
+            pattern = "Verbosity(0x0000)"
+            subst   = "Verbosity(0x0000)\n\n" + text_defining_functions_for_print_wavefunction_for_d4h_3d_ions
+            replace(filepath_lua, pattern, subst)
+
+            pattern = "-- Define the atomic term."
+            subst   = text_defining_base_for_printing_wavefunction_for_d4h_3d_ions + '\n\n--------------------------------------------------------------------------------\n-- Define the atomic term.'
+            replace(filepath_lua, pattern, subst)
+
+        if print_initial_wavefunctions or filepath_for_saving_initial_wavefunctions is not None:
+            assert self.element == 'Cu' and self.charge == '2+', f'Sorry, as for right now, `priting/saving wavefunctions` is only available for Cu2+'
+
+            if print_initial_wavefunctions: 
+                _verbose = 1
+            else:
+                _verbose = 0
+            if filepath_for_saving_initial_wavefunctions is not None:
+                _filepath = Path(filepath_for_saving_initial_wavefunctions)
+                # assert _filepath.is_file(), 'filepath_for_saving_initial_wavefunctions must point to a file'
+
+                if is_windows:
+                    parts = list(_filepath.parts)
+                    for i, part in enumerate(parts):
+                        if '\\' in part:
+                            parts[i] = part.replace('\\', '')
+                    _filepath = "'" + str(r'\\'.join(parts)) + "'"
+                else:
+                    _filepath = "'" + str(_filepath) + "'"
+            else:
+                _filepath = 'dummy'
+            
+            pattern = "-- Normalize dZ to unity."
+            subst   = f"-- print/save initial wavefunctions\npsi_i_str = print_psi(Psis_i, base_psis, base_dets, base_sphe, H_i, " + _filepath + f", {_verbose})" +  "\n\n-- Normalize dZ to unity."
+            replace(filepath_lua, pattern, subst)
+
+
+        if filepath_for_saving_all_eigenstates_of_initial_hamiltonian is not None:
+            assert self.element == 'Cu' and self.charge == '2+', f'Sorry, as for right now, `priting/saving wavefunctions` is only available for Cu2+'
+            
+            if filepath_for_saving_all_eigenstates_of_initial_hamiltonian is not None:
+                _filepath = Path(filepath_for_saving_all_eigenstates_of_initial_hamiltonian)
+                # assert _filepath.is_file(), 'filepath_for_saving_all_eigenstates_of_initial_hamiltonian must point to a file'
+
+                if is_windows:
+                    parts = list(_filepath.parts)
+                    for i, part in enumerate(parts):
+                        if '\\' in part:
+                            parts[i] = part.replace('\\', '')
+                    _filepath = "'" + str(r'\\'.join(parts)) + "'"
+                else:
+                    _filepath = "'" + str(_filepath) + "'"
+            else:
+                _filepath = 'dummy'
+            
+            pattern = "dZ = {}"
+            subst   = "dZ = {}\n\n-- save all eigenfunctions of H_i\n"
+            subst  += "if CalculationRestrictions == nil then\n"
+            subst  += "    Psis_all = Eigensystem(H_i, InitialRestrictions, NPsis)\n"
+            subst  += "else\n"
+            subst  += "    Psis_all = Eigensystem(H_i, InitialRestrictions, NPsis, {{'restrictions', CalculationRestrictions}})\n"
+            subst  += "end\n"
+            subst  += "psi_str = print_psi(Psis_all, base_psis, base_dets, base_sphe, H_i, " + _filepath + f", 0)\n"
+            subst  += "------------------------------------\n"
+            replace(filepath_lua, pattern, subst)
+
     def run(self):
         """Run Quanty.
 
@@ -1297,7 +1641,7 @@ class Calculation():
         filepath = Path(self.filepath_lua).with_suffix('.lua')
         return quanty(filepath)
 
-    # %% Spectrum
+    # % Spectrum
     def _copy_attrs_to_spectra(self, ss):          
 
         if isinstance(ss, settings._br.Spectra):
@@ -1424,7 +1768,7 @@ class Calculation():
         else:
             return data
 
-    # %% parameters
+    # % parameters
     def get_parameters(self):
         """Returns a dictionary with all mutable attributes."""
         p = dict(copy.deepcopy(self.hamiltonianData))
@@ -1521,7 +1865,29 @@ class Calculation():
                 for k3 in hamiltonianData[k1][k2]:
                     self.hamiltonianData[k1][k2][k3] = hamiltonianData[k1][k2][k3]
 
-# %% functions =========================================================
+    # % additional Quanty code ====================================================
+    def add_code_print_initial_wavefunctions(self):
+        pass
+
+    def add_code_to_save_initial_wavefunctions(self):
+        pass
+
+    def add_code_to_save_all_eigenstates_of_initial_hamiltonian(self):
+        pass
+
+
+        @filepath_for_saving_all_eigenstates_of_initial_hamiltonian.setter
+        def filepath_for_saving_all_eigenstates_of_initial_hamiltonian(self, value):
+            assert isinstance(value, str) or isinstance(value, Path) or value == None, f'filepath_for_saving_all_eigenstates_of_initial_hamiltonian needs to be None, string, or Path, not {type(value)}'
+            if value is not None:
+                assert self.element == 'Cu' and self.charge == '2+', f'Sorry, as for right now, `priting/saving wavefunctions` is only available for Cu2+'
+                # assert '3d' == self.q.block, f'Sorry, as for right now, `saving initial wavefunctions` is only available for 3d metals, not {self.q.block}'
+            self._filepath_for_saving_all_eigenstates_of_initial_hamiltonian = value
+        @filepath_for_saving_all_eigenstates_of_initial_hamiltonian.deleter
+        def filepath_for_saving_all_eigenstates_of_initial_hamiltonian(self):
+            raise AttributeError('Cannot delete object.')
+
+# % functions =========================================================
 def replace(filepath, pattern, subst):
     """replace pattern string by another string.
 
